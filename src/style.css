@@ -1,0 +1,130 @@
+:root {
+  --bg: #f5f1e8;
+  --text: #1f3d38;
+  --muted: #5b7a72;
+  --green: #d3e597;
+  --border: #e3ded2;
+}
+
+body {
+  margin: 0;
+  padding-bottom: 5.5rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+}
+
+/* Liste des messages */
+#messages {
+  list-style: none;
+  margin: 0;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+#messages > li {
+  max-width: 75%;
+  padding: 0.75rem 1rem;
+  border-radius: 1.25rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  box-shadow: 0 1px 2px rgba(31, 61, 56, 0.08);
+}
+
+/* Les autres : blanc, à gauche */
+#messages > li.other {
+  align-self: flex-start;
+  background: #fff;
+}
+
+/* Moi : vert, à droite */
+#messages > li.mine {
+  align-self: flex-end;
+  background: var(--green);
+}
+
+/* Pseudo au-dessus du message des autres */
+#messages > li > strong {
+  display: block;
+  margin-bottom: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* Messages système centrés */
+#messages > li.system {
+  align-self: center;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  font-style: italic;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Zone de saisie */
+#form {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  box-sizing: border-box;
+  background: #fff;
+  border-top: 1px solid var(--border);
+}
+
+#input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  font-size: 1rem; /* 16px minimum : évite le zoom auto sur iPhone */
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: #fff;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+#input:focus {
+  outline: none;
+  border-color: #9bb55a;
+  box-shadow: 0 0 0 3px rgba(211, 229, 151, 0.6);
+}
+
+#form > button {
+  display: grid;
+  place-items: center;
+  width: 2.9rem;
+  height: 2.9rem;
+  border: none;
+  border-radius: 1rem;
+  background: var(--green);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    filter 0.15s,
+    transform 0.1s;
+}
+
+#form > button:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+#form > button:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+#form > button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

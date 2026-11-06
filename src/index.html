@@ -1,120 +1,109 @@
 <!doctype html>
 <html lang="fr">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-    <title>Socket.IO chat</title>
-    <link rel="stylesheet" href="/style.css" />
-  </head>
-  <body>
-    <ul id="messages"></ul>
 
-    <form id="form">
-      <input
-        id="input"
-        type="text"
-        placeholder="Écris un message…"
-        aria-label="Message"
-        autocomplete="off"
-        autofocus
-        required
-      />
-      <button type="submit" aria-label="Envoyer">
-        <svg
-          viewBox="0 0 24 24"
-          width="20"
-          height="20"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="m22 2-7 20-4-9-9-4Z" />
-          <path d="M22 2 11 13" />
-        </svg>
-      </button>
-    </form>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>EasyChat.IO</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-      const socket = io();
+<body>
+  <ul id="messages"></ul>
 
-      const form = document.getElementById("form");
-      const input = document.getElementById("input");
-      const messages = document.getElementById("messages");
-      const button = form.querySelector("button");
+  <form id="form">
+    <input id="input" type="text" placeholder="Écris un message…" aria-label="Message" autocomplete="off" autofocus
+      required />
+    <button type="submit" aria-label="Envoyer">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <path d="m22 2-7 20-4-9-9-4Z" />
+        <path d="M22 2 11 13" />
+      </svg>
+    </button>
+  </form>
 
-      const pseudo = (prompt("Entre ton pseudo") || "").trim() || "Anonyme";
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
 
-      // Identifiant propre à cet onglet, conservé entre les reconnexions
-      const clientId =
-        sessionStorage.getItem("clientId") ??
-        (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2));
-      sessionStorage.setItem("clientId", clientId);
+    const form = document.getElementById("form");
+    const input = document.getElementById("input");
+    const messages = document.getElementById("messages");
+    const button = form.querySelector("button");
 
-      button.disabled = true;
+    const pseudo = (prompt("Entre ton pseudo") || "").trim() || "Anonyme";
 
-      function scrollToBottom() {
-        window.scrollTo(0, document.body.scrollHeight);
+    // Identifiant propre à cet onglet, conservé entre les reconnexions
+    const clientId =
+      sessionStorage.getItem("clientId") ??
+      crypto.randomUUID?.() ??
+      Math.random().toString(36).slice(2);
+    sessionStorage.setItem("clientId", clientId);
+
+    button.disabled = true;
+
+    function scrollToBottom() {
+      window.scrollTo(0, document.body.scrollHeight);
+    }
+
+    function addMessage(msg) {
+      const li = document.createElement("li");
+      const isMine = msg.clientId === clientId;
+      li.className = isMine ? "mine" : "other";
+
+      // Le pseudo n'est affiché que pour les messages des autres
+      if (!isMine) {
+        const strong = document.createElement("strong");
+        strong.textContent = msg.pseudo;
+        li.append(strong);
       }
 
-      function addMessage(msg) {
-        const li = document.createElement("li");
-        const isMine = msg.clientId === clientId;
-        li.className = isMine ? "mine" : "other";
+      const span = document.createElement("span");
+      span.textContent = msg.text;
+      li.append(span);
 
-        // Le pseudo n'est affiché que pour les messages des autres
-        if (!isMine) {
-          const strong = document.createElement("strong");
-          strong.textContent = msg.pseudo;
-          li.append(strong);
-        }
+      messages.appendChild(li);
+      scrollToBottom();
+    }
 
-        const span = document.createElement("span");
-        span.textContent = msg.text;
-        li.append(span);
+    function addSystemMessage(text) {
+      const li = document.createElement("li");
+      li.className = "system";
+      li.textContent = text;
+      messages.appendChild(li);
+      scrollToBottom();
+    }
 
-        messages.appendChild(li);
-        scrollToBottom();
+    // Renvoyé à chaque (re)connexion
+    socket.on("connect", () => {
+      socket.emit("join", pseudo, clientId);
+    });
+
+    input.addEventListener("input", () => {
+      button.disabled = input.value.trim() === "";
+    });
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (text) {
+        socket.emit("chat message", text);
+        input.value = "";
+        button.disabled = true;
+        input.focus();
       }
+    });
 
-      function addSystemMessage(text) {
-        const li = document.createElement("li");
-        li.className = "system";
-        li.textContent = text;
-        messages.appendChild(li);
-        scrollToBottom();
-      }
+    socket.on("chat message", addMessage);
+    socket.on("system message", addSystemMessage);
 
-      // Renvoyé à chaque (re)connexion
-      socket.on("connect", () => {
-        socket.emit("join", pseudo, clientId);
-      });
+    // Historique reçu à l'arrivée : on vide la liste pour éviter les doublons
+    socket.on("history", (msgs) => {
+      messages.replaceChildren();
+      msgs.forEach(addMessage);
+    });
+  </script>
+</body>
 
-      input.addEventListener("input", () => {
-        button.disabled = input.value.trim() === "";
-      });
-
-      form.addEventListener("submit", (e) => {
-        e.preventDefault();
-        const text = input.value.trim();
-        if (text) {
-          socket.emit("chat message", text);
-          input.value = "";
-          button.disabled = true;
-          input.focus();
-        }
-      });
-
-      socket.on("chat message", addMessage);
-      socket.on("system message", addSystemMessage);
-
-      // Historique reçu à l'arrivée : on vide la liste pour éviter les doublons
-      socket.on("history", (msgs) => {
-        messages.replaceChildren();
-        msgs.forEach(addMessage);
-      });
-    </script>
-  </body>
 </html>

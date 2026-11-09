@@ -4,6 +4,7 @@
   "workspaces": {
     "": {
       "dependencies": {
+        "@socket.io/cluster-adapter": "^0.3.0",
         "express": "^5.3.0",
         "socket.io": "^4.8.4",
       },
@@ -17,6 +18,8 @@
     },
   },
   "packages": {
+    "@socket.io/cluster-adapter": ["@socket.io/cluster-adapter@0.3.0", "", { "dependencies": { "debug": "~4.4.1" }, "peerDependencies": { "socket.io-adapter": "~2.5.5" } }, "sha512-pHtPlQrKCWb1FE49nSaQSqB0xWYZ/OU8ONxWLWU79u6OA92/IHeHolVTcJfrsiK2Zvrh1yvMo3tVFKKjlKkKRQ=="],
+
     "@socket.io/component-emitter": ["@socket.io/component-emitter@3.1.2", "", {}, "sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA=="],
 
     "@types/body-parser": ["@types/body-parser@1.19.6", "", { "dependencies": { "@types/connect": "*", "@types/node": "*" } }, "sha512-HLFeCYgz89uk22N5Qg3dvGvsv46B8GLvKKo1zKG4NybA8U2DiEO3w9lqGg29t/tfLRJpJ6iQxnVw4OnB7MoM9g=="],

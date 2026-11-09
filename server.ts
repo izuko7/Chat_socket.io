@@ -3,113 +3,159 @@ import { join } from "node:path";
 import { createServer } from "node:http";
 import { Server } from "socket.io";
 import { Database } from "bun:sqlite";
+import cluster from "node:cluster";
+import { availableParallelism } from "node:os";
+import { createAdapter, setupPrimary } from "@socket.io/cluster-adapter";
 
-type ChatMessage = {
-  id: number;
-  pseudo: string;
-  text: string;
-  clientId: string | null;
-  createdAt: number;
-};
+// ==========================================
+// PROCESSUS PRINCIPAL
+// ==========================================
 
-const db = new Database("chat.db");
+if (cluster.isPrimary) {
+  const numWorkers = Math.min(availableParallelism(), 3);
 
-db.run(`
-  CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    pseudo TEXT NOT NULL,
-    text TEXT NOT NULL,
-    client_id TEXT,
-    client_offset TEXT UNIQUE,
-    created_at INTEGER NOT NULL
-  )
-`);
-
-const insertMessage = db.query(
-  `INSERT OR IGNORE INTO messages
-   (pseudo, text, client_id, client_offset, created_at)
-   VALUES (?, ?, ?, ?, ?)`,
-);
-
-const selectAfter = db.query(
-  `SELECT id, pseudo, text, client_id AS clientId, created_at AS createdAt
-   FROM messages WHERE id > ? ORDER BY id`,
-);
-
-const app = express();
-const httpServer = createServer(app);
-const io = new Server(httpServer);
-
-// Sert style.css (et tout ce qui est dans src/)
-app.use(express.static(join(import.meta.dirname, "src")));
-
-app.get("/", (req, res) => {
-  res.sendFile(join(import.meta.dirname, "src/index.html"));
-});
-
-io.on("connection", (socket) => {
-  console.log("a user connected");
-
-  // Pseudo et clientId arrivent dès la connexion, via auth
-  const { pseudo, clientId, serverOffset } = socket.handshake.auth;
-
-  const cleanPseudo = String(pseudo ?? "").trim().slice(0, 20) || "Anonyme";
-  socket.data.pseudo = cleanPseudo;
-  socket.data.clientId = String(clientId ?? "").slice(0, 64) || null;
-
-  socket.broadcast.emit("system message", `${cleanPseudo} s'est connecté`);
-
-  // Messages manquants : ceux dont l'id dépasse le dernier vu par le client
-  const offset = Number(serverOffset) || 0;
-  const missed = selectAfter.all(offset) as ChatMessage[];
-  for (const msg of missed) {
-    socket.emit("chat message", msg);
+  for (let i = 0; i < numWorkers; i++) {
+    cluster.fork({ PORT: String(3000 + i) });
   }
 
-  socket.on(
-    "chat message",
-    (text: string, clientOffset: string, callback?: () => void) => {
-      const clean = String(text).trim().slice(0, 500);
-      if (!clean) {
-        callback?.();
-        return;
-      }
+  setupPrimary();
+} else {
+  // ==========================================
+  // WORKERS : EXPRESS ET SOCKET.IO
+  // ==========================================
 
-      const createdAt = Date.now();
+  type ChatMessage = {
+    id: number;
+    pseudo: string;
+    text: string;
+    clientId: string | null;
+    createdAt: number;
+  };
 
-      const result = insertMessage.run(
-        socket.data.pseudo,
-        clean,
-        socket.data.clientId,
-        String(clientOffset).slice(0, 100),
-        createdAt,
-      );
+  // BASE DE DONNÉES
+  const db = new Database("chat.db");
 
-      // Déjà enregistré (message renvoyé après une coupure) : on confirme sans rediffuser
-      if (result.changes === 0) {
-        callback?.();
-        return;
-      }
+  db.run("PRAGMA journal_mode = WAL");
+  db.run("PRAGMA busy_timeout = 5000");
 
-      const msg: ChatMessage = {
-        id: Number(result.lastInsertRowid),
-        pseudo: socket.data.pseudo,
-        text: clean,
-        clientId: socket.data.clientId,
-        createdAt,
-      };
+  db.run(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pseudo TEXT NOT NULL,
+      text TEXT NOT NULL,
+      client_id TEXT,
+      client_offset TEXT UNIQUE,
+      created_at INTEGER NOT NULL
+    )
+  `);
 
-      io.emit("chat message", msg);
-      callback?.();
-    },
+  const insertMessage = db.query(
+    `INSERT OR IGNORE INTO messages
+     (pseudo, text, client_id, client_offset, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
   );
 
-  socket.on("disconnect", () => {
-    console.log("user disconnected");
-    socket.broadcast.emit("system message", `${socket.data.pseudo} est parti`);
-  });
-});
+  const selectAfter = db.query(
+    `SELECT id, pseudo, text,
+            client_id AS clientId,
+            created_at AS createdAt
+     FROM messages WHERE id > ? ORDER BY id`,
+  );
 
-httpServer.listen(3000, () => {
-  console.log("Serveur lancé sur http://localhost:3000");
-});
+  // EXPRESS
+  const app = express();
+  const httpServer = createServer(app);
+
+  const io = new Server(httpServer, {
+    adapter: createAdapter(),
+  });
+
+  // Sert style.css (et tout ce qui est dans src/)
+  app.use(express.static(join(import.meta.dirname, "src")));
+
+  app.get("/", (req, res) => {
+    res.sendFile(join(import.meta.dirname, "src/index.html"));
+  });
+
+  // ==========================================
+  // SOCKET.IO
+  // ==========================================
+
+  io.on("connection", (socket) => {
+    console.log("a user connected");
+
+    const { pseudo, clientId, serverOffset } = socket.handshake.auth;
+
+    const cleanPseudo = String(pseudo ?? "").trim().slice(0, 20) || "Anonyme";
+
+    socket.data.pseudo = cleanPseudo;
+    socket.data.clientId = String(clientId ?? "").slice(0, 64) || null;
+
+    socket.broadcast.emit("system message", `${cleanPseudo} s'est connecté`);
+
+    // Messages manqués
+    const offset = Number(serverOffset) || 0;
+    const missed = selectAfter.all(offset) as ChatMessage[];
+
+    for (const msg of missed) {
+      socket.emit("chat message", msg);
+    }
+
+    // Réception des messages
+    socket.on(
+      "chat message",
+      (text: string, clientOffset: string, callback?: () => void) => {
+        const clean = String(text).trim().slice(0, 500);
+
+        if (!clean) {
+          callback?.();
+          return;
+        }
+
+        const createdAt = Date.now();
+
+        const result = insertMessage.run(
+          socket.data.pseudo,
+          clean,
+          socket.data.clientId,
+          String(clientOffset).slice(0, 100),
+          createdAt,
+        );
+
+        // Déjà enregistré (message renvoyé après une coupure)
+        if (result.changes === 0) {
+          callback?.();
+          return;
+        }
+
+        const msg: ChatMessage = {
+          id: Number(result.lastInsertRowid),
+          pseudo: socket.data.pseudo,
+          text: clean,
+          clientId: socket.data.clientId,
+          createdAt,
+        };
+
+        io.emit("chat message", msg);
+        callback?.();
+      },
+    );
+
+    // Déconnexion
+    socket.on("disconnect", () => {
+      console.log("user disconnected");
+
+      socket.broadcast.emit("system message", `${socket.data.pseudo} est parti`);
+    });
+  });
+
+  // ==========================================
+  // DÉMARRAGE
+  // ==========================================
+
+  const port = Number(process.env.PORT) || 3000;
+
+  httpServer.listen(port, () => {
+    console.log(`Worker ${process.pid} : http://localhost:${port}`);
+  });
+}

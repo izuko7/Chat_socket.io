@@ -128,3 +128,11 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+#messages > li > time {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-align: right;
+}

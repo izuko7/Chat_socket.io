@@ -20,12 +20,15 @@ db.run(`
     pseudo TEXT NOT NULL,
     text TEXT NOT NULL,
     client_id TEXT,
+    client_offset TEXT UNIQUE,
     created_at INTEGER NOT NULL
   )
 `);
 
 const insertMessage = db.query(
-  "INSERT INTO messages (pseudo, text, client_id, created_at) VALUES (?, ?, ?, ?)",
+  `INSERT OR IGNORE INTO messages
+   (pseudo, text, client_id, client_offset, created_at)
+   VALUES (?, ?, ?, ?, ?)`,
 );
 
 const selectAfter = db.query(
@@ -47,48 +50,63 @@ app.get("/", (req, res) => {
 io.on("connection", (socket) => {
   console.log("a user connected");
 
-  // Le client envoie l'id du dernier message qu'il a vu
-  const offset = Number(socket.handshake.auth.serverOffset) || 0;
+  // Pseudo et clientId arrivent dès la connexion, via auth
+  const { pseudo, clientId, serverOffset } = socket.handshake.auth;
 
+  const cleanPseudo = String(pseudo ?? "").trim().slice(0, 20) || "Anonyme";
+  socket.data.pseudo = cleanPseudo;
+  socket.data.clientId = String(clientId ?? "").slice(0, 64) || null;
+
+  socket.broadcast.emit("system message", `${cleanPseudo} s'est connecté`);
+
+  // Messages manquants : ceux dont l'id dépasse le dernier vu par le client
+  const offset = Number(serverOffset) || 0;
   const missed = selectAfter.all(offset) as ChatMessage[];
   for (const msg of missed) {
     socket.emit("chat message", msg);
   }
 
-  socket.on("join", (pseudo: string, clientId: string) => {
-    const clean = String(pseudo).trim().slice(0, 20) || "Anonyme";
-    socket.data.pseudo = clean;
-    socket.data.clientId = String(clientId).slice(0, 64);
+  socket.on(
+    "chat message",
+    (text: string, clientOffset: string, callback?: () => void) => {
+      const clean = String(text).trim().slice(0, 500);
+      if (!clean) {
+        callback?.();
+        return;
+      }
 
-    socket.broadcast.emit("system message", `${clean} s'est connecté`);
-  });
+      const createdAt = Date.now();
 
-  socket.on("chat message", (text: string) => {
-    const clean = String(text).trim().slice(0, 500);
-    if (!clean) return;
+      const result = insertMessage.run(
+        socket.data.pseudo,
+        clean,
+        socket.data.clientId,
+        String(clientOffset).slice(0, 100),
+        createdAt,
+      );
 
-    const pseudo = socket.data.pseudo ?? "Anonyme";
-    const clientId = socket.data.clientId ?? null;
-    const createdAt = Date.now();
+      // Déjà enregistré (message renvoyé après une coupure) : on confirme sans rediffuser
+      if (result.changes === 0) {
+        callback?.();
+        return;
+      }
 
-    const result = insertMessage.run(pseudo, clean, clientId, createdAt);
+      const msg: ChatMessage = {
+        id: Number(result.lastInsertRowid),
+        pseudo: socket.data.pseudo,
+        text: clean,
+        clientId: socket.data.clientId,
+        createdAt,
+      };
 
-    const msg: ChatMessage = {
-      id: Number(result.lastInsertRowid),
-      pseudo,
-      text: clean,
-      clientId,
-      createdAt,
-    };
-
-    io.emit("chat message", msg);
-  });
+      io.emit("chat message", msg);
+      callback?.();
+    },
+  );
 
   socket.on("disconnect", () => {
     console.log("user disconnected");
-    if (socket.data.pseudo) {
-      socket.broadcast.emit("system message", `${socket.data.pseudo} est parti`);
-    }
+    socket.broadcast.emit("system message", `${socket.data.pseudo} est parti`);
   });
 });
 
